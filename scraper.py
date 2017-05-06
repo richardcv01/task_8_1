@@ -1,11 +1,9 @@
 import asyncio
-
-import aiohttp
+from aiohttp import ClientSession
 from lxml import etree
-import browser_cookie3
-from aiocfscrape import CloudflareScraper
-
-list_res = {}
+#from aiocfscrape import CloudflareScraper
+import pandas as pd
+import re
 
 async def fetch(session, url):
     headers = {'Host': 'coinmarketcap.com',
@@ -16,26 +14,51 @@ async def fetch(session, url):
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:51.0) Gecko/20100101 Firefox/51.0'}
-    async with session.get(url, proxy="http://10.24.100.210:3128", headers=headers) as response:
+    #proxy = "http://10.24.100.210:3128"
+    async with session.get(url, headers=headers) as response:
         return await response.text()
 
 
 async def main(loop):
-    async with aiohttp.ClientSession(loop=loop) as session:
-        #tasks = [(get_text_title(session, title, url, author)) for title, url, author in
-                 #zip(list_url['list_title'], list_url['list_url_title'], list_url['list_author'])]
-        #await asyncio.gather(*tasks)
-        #cj = browser_cookie3.chrome()
-        #for k in cj:
-         #   print(k)
-        #cook = {'__cfduid':'ded06760021d16970ff4baf846330c9171493984539'}
-        html =await fetch(session, 'https://coinmarketcap.com/all/views/all/')
-        #table = etree.HTML(html).find('table')
-        #table = tree.xpath('//table[@id="currencies-all"]')
-        #row = table.xpath('//td[@class="no-wrap currency-name"]')
-        #text = row.xpath('//a/text()')
-        print(html)
+    async with ClientSession(loop=loop) as session:
+        html = await fetch(session, 'https://coinmarketcap.com/all/views/all/')
+        #with open('html.txt', 'w') as f:
+            #f.write(html)
+        tup_value = await turple_value(html)
+        writet_to_exel(tup_value)
 
+
+async def turple_value(html):
+    tree = etree.HTML(html)
+    table = tree.xpath('//table[@id="currencies-all"]')
+    name = {'Name': table[0].xpath('//td[@class="no-wrap currency-name"]/a/text()')}
+    symbol = {'Symbol': table[0].xpath('//td[@class="text-left"]/text()')}
+    market_cap = {'market_cap': [re.sub(r'\s', '', s) for s in
+                                 table[0].xpath('//td[@class="no-wrap market-cap text-right"]/text()')]}
+    price = {'Price': table[0].xpath('//a[@class="price"]/text()')}
+    table_obj = table[0].xpath('//tr[@id="id-bond"]')
+    circulating_supply = {'Circulating supply': table_obj[0].xpath('//td[5]/a/text()')}
+    volume = {'Volume': [re.sub(r'\s', '', s) for s in table_obj[0].xpath('//td[6]/a/text() | //td[6]/span/text()')]}
+    h1 = {'% h1': table_obj[0].xpath('//td[8]/text() | //td[8]/span/text()')}
+    h24 = {'% h24': table_obj[0].xpath('//td[9]/text() | //td[9]/span/text()')}
+    d7 = {'% d7': table_obj[0].xpath('//td[10]/text() | //td[10]/span/text()')}
+    return name, symbol, market_cap, price, circulating_supply, volume, h1, h24, d7
+
+def writet_to_exel(args):
+    writer = pd.ExcelWriter('pandas_simple.xlsx', engine='xlsxwriter')
+    i = 0
+    print()
+    for arg in args:
+        df = pd.DataFrame(arg)
+        df.to_excel(writer, sheet_name='Sheet1', index=False,startcol=i)
+        i = i + 1
+    workbook  = writer.book
+    worksheet = writer.sheets['Sheet1']
+    format1 = workbook.add_format({'num_format': '$#,##0'})
+    worksheet.set_column('C:D', None, format1)
+    worksheet.set_column('F:F', None, format1)
+    format2 = workbook.add_format({'num_format': '#,##%'})
+    worksheet.set_column('G:I', None, format2)
 
 
 event_loop = asyncio.get_event_loop()
